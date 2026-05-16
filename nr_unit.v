@@ -87,7 +87,7 @@ always @(posedge clk or posedge reset) begin
             UNPACK: begin
                 // unpack logic
                 // set exp_in and mant_q
-                //FE: ARE THESE THE SAME FOR EITHER CASE?
+                // FE: ARE THESE THE SAME FOR EITHER CASE?
                 exp_in =  exp_in_MASK & x; // exponent bits
                 mant_q =  (mant_q_MASK & x) << 16; // mantissa (fraction) bits in the Q16.16 format
 
@@ -97,35 +97,36 @@ always @(posedge clk or posedge reset) begin
                 // prep logic
                 // set arg_q and exp_work
 
-                if (key == 0'b01) begin // CASE: sqrt --> arg_q === d  --> arg_q needs to be shifted value of the unpacked value of x?
+                if (key == 2'b01) begin // CASE: sqrt --> arg_q === d  --> arg_q needs to be shifted value of the unpacked value of x?
                     arg_q = mantissa * (2 ** (exp_in - 127));  // we assume positive, and now this gives us the actual arg value
                     exp_work = exp_in - 127; // This is the working exponential (after the shift)
-                end else if (key == 0'b10) begin
+                end else if (key == 2'b10) begin
                     if (exp_in[0] == 0) begin
                         arg_q = ONE_Q;
                         exp_work = exp_in - 127; // This is the working exponential (after the shift)
                     end else if (exp_in[0] == 1) begin
                         arg_q = TWO_Q;
                         exp_work = exp_in - 127 - 1; // Subtract one extra for the two you put earlier in this case
-                    arg_q = // In this case, arg_q is the c value in the reciprocal?
-                
+			// FE: In this case, arg_q is the c value in the reciprocal?
+		    end                
+		end
             end
 
             SEED: begin
                 // seed logic
                 // set seed_q
-                if (key == 0'b01) begin
+                if (key == 2'b01) begin
                     seed_q = rsqrt_seed << 16;
-                end else if (key == 0'b01) begin
+                end else if (key == 2'b01) begin
                     seed_q = recip_seed << 16;
                 end
             end
 
             ITER1: begin
-                if (key == 0'b10) begin
+                if (key == 2'b10) begin
                     // Reciprocal:
                     y_q <= qmul(seed_q, (TWO_Q - qmul(arg_q, seed_q)));
-                end else if (key == 0'b01)
+                end else if (key == 2'b01) begin
                     // Reciprocal square root:
                     y_q <= qmul(seed_q, (THREE_Q - qmul(arg_q,
                     qmul(seed_q, seed_q)))) >> 1;
@@ -135,17 +136,14 @@ always @(posedge clk or posedge reset) begin
 
             ITER2: begin
                 // Repeat the same Newton--Raphson update using y_q.
-                if (key == 0'b10) begin
+                if (key == 2'b10) begin
                     // Reciprocal:
                     y_q <= qmul(seed_q, (TWO_Q - qmul(arg_q, seed_q)));
-                end else if (key == 0'b01)
+                end else if (key == 2'b01) begin
                     // Reciprocal square root:
                     y_q <= qmul(seed_q, (THREE_Q - qmul(arg_q,
                     qmul(seed_q, seed_q)))) >> 1;
                 end
-                state <= ITER2;
-            end
-
                 state <= FINAL;
             end
 
@@ -153,17 +151,12 @@ always @(posedge clk or posedge reset) begin
                 // For square root: multiply argument by reciprocal square root estimate
                 // For reciprocal: conditionally normalize mantissa if it falls below 1.0
                 // For both: output out_mant_q and final_exp for pack_bfloat16 module
-                if (key == 0'b10) begin
+                if (key == 2'b10) begin // FE: I guess I just negate the exponent?
                     out_mant_q = y_q * arg_q;
-                    final_exp = 
-                end else if (key == 0'b01) begin
-                    while (mant_q < 1.0) begin
-                        mant_q << 
-                    if (mant_q < 1.0) begin
-                        
-                    out_mant_q = // HOW TO NORMALIZE MANTISSA? 
-                    
-
+                    final_exp = -exp_in;
+                end else if (key == 2'b01) begin
+                        out_mant_q = mant_q << 16; // FE: Still need to acutally normalize mantissa
+		end
                 state <= DONE_S;
             end
 
