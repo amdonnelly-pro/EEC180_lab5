@@ -1,0 +1,47 @@
+module tb;
+
+reg clk;
+reg reset;
+reg [15:0] x;
+reg [1:0] key;
+wire [15:0] y;
+wire done;
+
+top_level dut(clk, reset, x, key, y, done);
+
+always #5 clk = ~clk;
+
+task run_case;
+    input [15:0] x_in;
+    input [1:0] key_in;
+    begin
+        @(negedge clk);
+        x = x_in;
+        key = key_in;
+
+        @(negedge clk);
+        key = 2'b00;
+        
+        @(posedge done);
+        $display("x=%h key=%b y=%h", x_in, key_in, y);
+    end
+endtask
+
+initial begin
+    clk = 1'b0;
+    reset = 1'b1;
+    x = 16'h0000;
+    key = 2'b00;
+    
+    #20 reset = 1'b0;
+    
+    run_case(16'h3f80, 2'b10); // 1 / 1.0
+    run_case(16'h4000, 2'b10); // 1 / 2.0
+    run_case(16'h3f80, 2'b01); // sqrt(1.0)
+    run_case(16'h4000, 2'b01); // sqrt(2.0)
+    // add more cases to exhaustively test all parts of your implementation
+
+    $stop;
+end
+
+endmodule
