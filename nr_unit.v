@@ -1,167 +1,194 @@
 module nr_unit(
     input clk,
-	input reset,
-	input [15:0] x,
-	input [1:0] key,
-	
-	output reg [31:0] arg_q,
-	input [31:0] recip_seed,
-	input [31:0] rsqrt_seed,
-	
-	output reg [31:0] out_mant_q,
-	output reg signed [9:0] final_exp,
-	output reg done
+    input reset,
+    input [15:0] x,
+    input [1:0] key,
+
+    output reg [31:0] arg_q,
+    input [31:0] recip_seed,
+    input [31:0] rsqrt_seed,
+
+    output reg [31:0] out_mant_q,
+    output reg signed [9:0] final_exp,
+    output reg done
 );
 
+localparam [31:0] ONE_Q   = 32'd65536;
+localparam [31:0] TWO_Q   = 32'd131072;
+localparam [31:0] THREE_Q = 32'd196608;
 
-localparam [31:0] ONE_Q   = 32'd65536;  // 1.0 in Q16.16 fixed-point (1 * 2^16)
-localparam [31:0] TWO_Q   = 32'd131072; // 2.0 in Q16.16 fixed-point (2 * 2^16)
-localparam [31:0] THREE_Q = 32'd196608; // 3.0 in Q16.16 fixed-point (3 * 2^16)
+// FSM steps through the lab calculation instead of doing it all in one cycle.
+localparam [3:0] IDLE      = 4'd0;
+localparam [3:0] UNPACK    = 4'd1;
+localparam [3:0] PREP      = 4'd2;
+localparam [3:0] SEED      = 4'd3;
+localparam [3:0] ITER_MUL1 = 4'd4;
+localparam [3:0] ITER_MUL2 = 4'd5;
+localparam [3:0] ITER_MUL3 = 4'd6;
+localparam [3:0] FINAL     = 4'd7;
+localparam [3:0] DONE_S    = 4'd8;
 
-localparam [2:0] IDLE   = 3'd0;
-localparam [2:0] UNPACK = 3'd1;
-localparam [2:0] PREP   = 3'd2;
-localparam [2:0] SEED   = 3'd3;
-localparam [2:0] ITER1  = 3'd4;
-localparam [2:0] ITER2  = 3'd5;
-localparam [2:0] FINAL  = 3'd6;
-localparam [2:0] DONE_S = 3'd7;
-
-// addition 1
-localparam [15:0] exp_in_MASK = 16'd32640;
-localparam [15:0] mant_q_MASK = 16'd127;
-
-reg [2:0] state;
-
+reg [3:0] state;
 reg [15:0] x_reg;
 reg op_sqrt;
+reg iter_count;
 
 reg signed [9:0] exp_in;
 reg signed [9:0] exp_work;
 reg [31:0] mant_q;
-
-reg [31:0] seed_q;
 reg [31:0] y_q;
-
 reg [31:0] term_q;
-reg [31:0] factor_q;
 reg [31:0] y_sq_q;
 
-function [31:0] qmul;
-    input [31:0] a;
-    input [31:0] b;
-    reg [63:0] prod, prod_lsb;
-    begin
-        // multiply
-        prod = a * b;
-        // round
-        prod_lsb = prod + 32'h8000; // add half LSB
-        qmul = prod_lsb[47:16]; // truncate
-    end
-endfunction
+reg [31:0] mul_a;
+reg [31:0] mul_b;
+wire [63:0] mul_prod;
+wire [31:0] mul_q;
+
+assign mul_prod = mul_a * mul_b;
+assign mul_q = mul_prod[47:16];
+
+// One shared Q16.16 multiplier. The state decides what gets multiplied.
+always @* begin
+    mul_a = 32'd0;
+    mul_b = 32'd0;
+
+    case (state)
+        ITER_MUL1: begin
+            if (op_sqrt) begin
+                mul_a = y_q;
+                mul_b = y_q;
+            end else begin
+                mul_a = arg_q;
+                mul_b = y_q;
+            end
+        end
+
+        ITER_MUL2: begin
+            mul_a = arg_q;
+            mul_b = y_sq_q;
+        end
+
+        ITER_MUL3: begin
+            if (op_sqrt) begin
+                mul_a = y_q >> 1;
+                mul_b = THREE_Q - term_q;
+            end else begin
+                mul_a = y_q;
+                mul_b = TWO_Q - term_q;
+            end
+        end
+
+        FINAL: begin
+            if (op_sqrt) begin
+                mul_a = arg_q;
+                mul_b = y_q;
+            end
+        end
+    endcase
+end
 
 always @(posedge clk or posedge reset) begin
     if (reset) begin
-        state    <= IDLE;
-        x_reg    <= 16'd0;
-        op_sqrt  <= 1'b0;
-        exp_in   <= 10'sd0;
+        state <= IDLE;
+        x_reg <= 16'd0;
+        op_sqrt <= 1'b0;
+        iter_count <= 1'b0;
+        exp_in <= 10'sd0;
         exp_work <= 10'sd0;
-        mant_q   <= 32'd0;
-        arg_q    <= 32'd0;
-        seed_q   <= 32'd0;
-        y_q      <= 32'd0;
-        done     <= 1'b0;
+        mant_q <= 32'd0;
+        arg_q <= 32'd0;
+        y_q <= 32'd0;
+        term_q <= 32'd0;
+        y_sq_q <= 32'd0;
+        out_mant_q <= 32'd0;
+        final_exp <= 10'sd0;
+        done <= 1'b0;
     end else begin
         done <= 1'b0;
 
         case (state)
             IDLE: begin
                 if ((key == 2'b01) || (key == 2'b10)) begin
-                    x_reg   <= x;
+                    x_reg <= x;
                     op_sqrt <= (key == 2'b01);
-                    state   <= UNPACK;
+                    state <= UNPACK;
                 end
             end
 
             UNPACK: begin
-                // unpack logic
-                // set exp_in and mant_q
-                // FE: ARE THESE THE SAME FOR EITHER CASE?
-                exp_in =  exp_in_MASK & x; // exponent bits
-                mant_q =  (mant_q_MASK & x) << 16; // mantissa (fraction) bits in the Q16.16 format
-
+                // Split bfloat16 into exponent and mantissa, then convert mantissa to Q16.16.
+                exp_in <= $signed({2'b00, x_reg[14:7]}) - 10'sd127;
+                mant_q <= ONE_Q | ({25'd0, x_reg[6:0]} << 9);
+                state <= PREP;
             end
 
             PREP: begin
-                // prep logic
-                // set arg_q and exp_work
-
-                if (key == 2'b01) begin // CASE: sqrt --> arg_q === d  --> arg_q needs to be shifted value of the unpacked value of x?
-                    arg_q = mantissa * (2 ** (exp_in - 127));  // we assume positive, and now this gives us the actual arg value
-                    exp_work = exp_in - 127; // This is the working exponential (after the shift)
-                end else if (key == 2'b10) begin
-                    if (exp_in[0] == 0) begin
-                        arg_q = ONE_Q;
-                        exp_work = exp_in - 127; // This is the working exponential (after the shift)
-                    end else if (exp_in[0] == 1) begin
-                        arg_q = TWO_Q;
-                        exp_work = exp_in - 127 - 1; // Subtract one extra for the two you put earlier in this case
-			// FE: In this case, arg_q is the c value in the reciprocal?
-		    end                
-		end
+                if (op_sqrt) begin
+                    // For sqrt, make the exponent even so the mantissa stays in the ROM range.
+                    if (exp_in[0]) begin
+                        arg_q <= mant_q << 1;
+                        exp_work <= (exp_in - 10'sd1) >>> 1;
+                    end else begin
+                        arg_q <= mant_q;
+                        exp_work <= exp_in >>> 1;
+                    end
+                end else begin
+                    arg_q <= mant_q;
+                    exp_work <= -exp_in;
+                end
+                state <= SEED;
             end
 
             SEED: begin
-                // seed logic
-                // set seed_q
-                if (key == 2'b01) begin
-                    seed_q = rsqrt_seed << 16;
-                end else if (key == 2'b01) begin
-                    seed_q = recip_seed << 16;
+                // Start with the lookup table estimate, then do two Newton-Raphson rounds.
+                y_q <= op_sqrt ? rsqrt_seed : recip_seed;
+                iter_count <= 1'b0;
+                state <= ITER_MUL1;
+            end
+
+            ITER_MUL1: begin
+                if (op_sqrt) begin
+                    y_sq_q <= mul_q;
+                    state <= ITER_MUL2;
+                end else begin
+                    term_q <= mul_q;
+                    state <= ITER_MUL3;
                 end
             end
 
-            ITER1: begin
-                if (key == 2'b10) begin
-                    // Reciprocal:
-                    y_q <= qmul(seed_q, (TWO_Q - qmul(arg_q, seed_q)));
-                end else if (key == 2'b01) begin
-                    // Reciprocal square root:
-                    y_q <= qmul(seed_q, (THREE_Q - qmul(arg_q,
-                    qmul(seed_q, seed_q)))) >> 1;
-                end
-                state <= ITER2;
+            ITER_MUL2: begin
+                term_q <= mul_q;
+                state <= ITER_MUL3;
             end
 
-            ITER2: begin
-                // Repeat the same Newton--Raphson update using y_q.
-                if (key == 2'b10) begin
-                    // Reciprocal:
-                    y_q <= qmul(seed_q, (TWO_Q - qmul(arg_q, seed_q)));
-                end else if (key == 2'b01) begin
-                    // Reciprocal square root:
-                    y_q <= qmul(seed_q, (THREE_Q - qmul(arg_q,
-                    qmul(seed_q, seed_q)))) >> 1;
+            ITER_MUL3: begin
+                y_q <= mul_q;
+                if (iter_count == 1'b0) begin
+                    iter_count <= 1'b1;
+                    state <= ITER_MUL1;
+                end else begin
+                    state <= FINAL;
                 end
-                state <= FINAL;
             end
 
             FINAL: begin
-                // For square root: multiply argument by reciprocal square root estimate
-                // For reciprocal: conditionally normalize mantissa if it falls below 1.0
-                // For both: output out_mant_q and final_exp for pack_bfloat16 module
-                if (key == 2'b10) begin // FE: I guess I just negate the exponent?
-                    out_mant_q = y_q * arg_q;
-                    final_exp = -exp_in;
-                end else if (key == 2'b01) begin
-                        out_mant_q = mant_q << 16; // FE: Still need to acutally normalize mantissa
-		end
+                if (op_sqrt) begin
+                    // sqrt(x) = x * rsqrt(x), so this turns the final rsqrt into sqrt.
+                    out_mant_q <= mul_q;
+                    final_exp <= exp_work;
+                end else if (y_q < ONE_Q) begin
+                    out_mant_q <= y_q << 1;
+                    final_exp <= exp_work - 10'sd1;
+                end else begin
+                    out_mant_q <= y_q;
+                    final_exp <= exp_work;
+                end
                 state <= DONE_S;
             end
 
             DONE_S: begin
-                done  <= 1'b1;
+                done <= 1'b1;
                 state <= IDLE;
             end
 

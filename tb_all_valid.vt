@@ -1,0 +1,168 @@
+module tb_all_valid;
+
+reg clk;
+reg reset;
+reg [15:0] x;
+reg [1:0] key;
+wire [15:0] y;
+wire done;
+
+integer exp_i;
+integer mant_i;
+integer tests;
+integer failures;
+integer min_cycles;
+integer max_cycles;
+
+top_level dut (clk, reset, x, key, y, done);
+
+always #5 clk = ~clk;
+
+function real pow2;
+    input integer exponent;
+    real value;
+    integer i;
+    begin
+        value = 1.0;
+        if (exponent >= 0) begin
+            for (i = 0; i < exponent; i = i + 1) value = value * 2.0;
+        end else begin
+            for (i = 0; i < -exponent; i = i + 1) value = value / 2.0;
+        end
+        pow2 = value;
+    end
+endfunction
+
+function real bf16_to_real;
+    input [15:0] bf;
+    integer unbiased_exp;
+    real mantissa;
+    begin
+        unbiased_exp = bf[14:7] - 127;
+        mantissa = 1.0 + (bf[6:0] / 128.0);
+        bf16_to_real = mantissa * pow2(unbiased_exp);
+    end
+endfunction
+
+function [15:0] real_to_bf16_pos;
+    input real value;
+    real mantissa;
+    real max_finite;
+    real min_normal;
+    real min_subnormal;
+    integer exponent;
+    integer biased_exp;
+    integer fraction;
+    begin
+        max_finite = (2.0 - (1.0 / 128.0)) * pow2(127);
+        min_normal = pow2(-126);
+        min_subnormal = pow2(-133);
+
+        if (value <= 0.0) begin
+            real_to_bf16_pos = 16'h0000;
+        end else if (value >= max_finite) begin
+            real_to_bf16_pos = 16'h7f7f;
+        end else if (value < min_normal) begin
+            fraction = $rtoi((value / min_subnormal) + 0.5);
+            if (fraction >= 128) begin
+                real_to_bf16_pos = 16'h0080;
+            end else begin
+                real_to_bf16_pos = {1'b0, 8'd0, fraction[6:0]};
+            end
+        end else begin
+            mantissa = value;
+            exponent = 0;
+            while (mantissa >= 2.0) begin
+                mantissa = mantissa / 2.0;
+                exponent = exponent + 1;
+            end
+            while (mantissa < 1.0) begin
+                mantissa = mantissa * 2.0;
+                exponent = exponent - 1;
+            end
+
+            fraction = $rtoi(((mantissa - 1.0) * 128.0) + 0.5);
+            if (fraction >= 128) begin
+                fraction = 0;
+                exponent = exponent + 1;
+            end
+
+            biased_exp = exponent + 127;
+            if (biased_exp >= 255) begin
+                real_to_bf16_pos = 16'h7f7f;
+            end else begin
+                real_to_bf16_pos = {1'b0, biased_exp[7:0], fraction[6:0]};
+            end
+        end
+    end
+endfunction
+
+task run_case;
+    input [15:0] x_in;
+    input [1:0] key_in;
+    reg [15:0] expected;
+    real x_real;
+    real result_real;
+    integer clock_count;
+    begin
+        x_real = bf16_to_real(x_in);
+        result_real = (key_in == 2'b10) ? (1.0 / x_real) : $sqrt(x_real);
+        expected = real_to_bf16_pos(result_real);
+
+        @(negedge clk);
+        x = x_in;
+        key = key_in;
+        clock_count = 0;
+
+        while ((done != 1'b1) && (clock_count < 40)) begin
+            @(negedge clk);
+            key = 2'b00;
+            clock_count = clock_count + 1;
+        end
+
+        tests = tests + 1;
+        if (clock_count < min_cycles) min_cycles = clock_count;
+        if (clock_count > max_cycles) max_cycles = clock_count;
+
+        if (done != 1'b1) begin
+            failures = failures + 1;
+            $display("TIMEOUT x=%h key=%b", x_in, key_in);
+        end else if (y != expected) begin
+            failures = failures + 1;
+            $display("FAIL cycles=%0d x=%h key=%b y=%h expected=%h",
+                     clock_count, x_in, key_in, y, expected);
+        end
+    end
+endtask
+
+initial begin
+    clk = 1'b0;
+    reset = 1'b1;
+    x = 16'h0000;
+    key = 2'b00;
+    tests = 0;
+    failures = 0;
+    min_cycles = 999;
+    max_cycles = 0;
+
+    #20;
+    reset = 1'b0;
+
+    for (exp_i = 1; exp_i < 255; exp_i = exp_i + 1) begin
+        for (mant_i = 0; mant_i < 128; mant_i = mant_i + 1) begin
+            run_case({1'b0, exp_i[7:0], mant_i[6:0]}, 2'b10);
+            run_case({1'b0, exp_i[7:0], mant_i[6:0]}, 2'b01);
+        end
+    end
+
+    if (failures == 0) begin
+        $display("EXHAUSTIVE PASS: tests=%0d min_cycles=%0d max_cycles=%0d",
+                 tests, min_cycles, max_cycles);
+    end else begin
+        $display("EXHAUSTIVE FAIL: tests=%0d failures=%0d min_cycles=%0d max_cycles=%0d",
+                 tests, failures, min_cycles, max_cycles);
+    end
+    $finish;
+end
+
+endmodule

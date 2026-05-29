@@ -1,0 +1,5 @@
+QUARTUS_VERSION = "19.1"
+DATE = "May 29, 2026"
+
+# Revisions
+PROJECT_REVISION = "EEC180_lab5"

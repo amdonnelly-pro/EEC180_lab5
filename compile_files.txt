@@ -1,3 +1,4 @@
-nr_unit.v
 lookup_table.v
+pack_bfloat16.v
+nr_unit.v
 top_level.v

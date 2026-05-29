@@ -1,0 +1,12 @@
+
+State Machine - |top|top_level:core|nr_unit:fsm|state
+Name state.FINAL state.ITER_MUL3 state.ITER_MUL2 state.ITER_MUL1 state.SEED state.PREP state.UNPACK state.IDLE state.DONE_S 
+state.IDLE 0 0 0 0 0 0 0 0 0 
+state.UNPACK 0 0 0 0 0 0 1 1 0 
+state.PREP 0 0 0 0 0 1 0 1 0 
+state.SEED 0 0 0 0 1 0 0 1 0 
+state.ITER_MUL1 0 0 0 1 0 0 0 1 0 
+state.ITER_MUL2 0 0 1 0 0 0 0 1 0 
+state.ITER_MUL3 0 1 0 0 0 0 0 1 0 
+state.FINAL 1 0 0 0 0 0 0 1 0 
+state.DONE_S 0 0 0 0 0 0 0 1 1 

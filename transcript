@@ -1,0 +1,29 @@
+# vsim -c work.tb -do "run -all; quit -f" 
+# Start time: 21:31:24 on May 28,2026
+# Loading work.tb
+# Loading work.top_level
+# Loading work.rsqrt_rom
+# Loading work.recip_rom
+# Loading work.nr_unit
+# Loading work.pack_bfloat16
+# run -all
+# cycles=10: x=3f80 key=10 y=3f80 - CORRECT (expected=3f80)
+# cycles=10: x=4000 key=10 y=3f00 - CORRECT (expected=3f00)
+# cycles=12: x=3f80 key=01 y=3f80 - CORRECT (expected=3f80)
+# cycles=12: x=4000 key=01 y=3fb5 - CORRECT (expected=3fb5)
+# cycles=12: x=4080 key=01 y=4000 - CORRECT (expected=4000)
+# cycles=12: x=3f00 key=01 y=3f35 - CORRECT (expected=3f35)
+# cycles=10: x=3fff key=10 y=3f01 - CORRECT (expected=3f01)
+# cycles=12: x=3fff key=01 y=3fb5 - CORRECT (expected=3fb5)
+# cycles=10: x=3fc0 key=10 y=3f2b - CORRECT (expected=3f2b)
+# cycles=10: x=0080 key=10 y=7e80 - CORRECT (expected=7e80)
+# cycles=12: x=0080 key=01 y=2000 - CORRECT (expected=2000)
+# cycles=10: x=7e80 key=10 y=0080 - CORRECT (expected=0080)
+# cycles=12: x=7f7f key=01 y=5f7f - CORRECT (expected=5f7f)
+# ** Note: $stop    : tb_updated.vt(93)
+#    Time: 1580 ps  Iteration: 1  Instance: /tb
+# Break in Module tb at tb_updated.vt line 93
+# Stopped at tb_updated.vt line 93
+#  quit -f
+# End time: 21:31:24 on May 28,2026, Elapsed time: 0:00:00
+# Errors: 0, Warnings: 0

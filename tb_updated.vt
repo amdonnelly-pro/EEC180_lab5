@@ -1,0 +1,96 @@
+module tb;
+
+reg clk;
+reg reset;
+reg [15:0] x;
+reg [1:0] key;
+wire [15:0] y;
+wire done;
+
+top_level dut (clk, reset, x, key, y, done);
+
+always #5 clk = ~clk;
+
+task run_case;
+    input [15:0] x_in;
+    input [1:0] key_in;
+
+    reg sign;
+    reg [7:0] exp8;
+    reg [6:0] mant7;
+    reg [10:0] exp11;
+    reg [51:0] mant52;
+    real x_float;
+    real result;
+    reg [63:0] expected64;
+    reg [15:0] expected;
+
+    reg [5:0] clock_count;
+
+    begin
+        // Compute expected
+        sign  = x_in[15];
+        exp8  = x_in[14:7];
+        mant7 = x_in[6:0];
+
+        exp11 = exp8 + 11'd896;
+        x_float = $bitstoreal({sign, exp11, mant7, 45'b0});
+
+        result = (key_in == 2'b10) ? (1.0 / x_float) : ($sqrt(x_float));
+
+        expected64 = $realtobits(result);
+        sign   = expected64[63];
+        exp11  = expected64[62:52];
+        mant52 = expected64[51:0] + {7'b0, expected64[44], 44'b0};
+
+        exp8 = exp11 - 11'd896;
+        expected = {sign, exp8, mant52[51:45]};
+
+        // Run simulation
+        @(negedge clk);
+        x = x_in;
+        key = key_in;
+        clock_count = 0;
+        while (done != 1'b1) begin
+            // count clock cycles
+            @(negedge clk);
+            key = 2'b00;
+            clock_count = clock_count + 1'b1;
+        end
+        // output results
+        if (y == expected) begin
+            $display("cycles=%d: x=%h key=%b y=%h - CORRECT (expected=%h)", clock_count, x_in, key_in, y, expected);
+        end
+        else begin
+            $display("cycles=%d: x=%h key=%b y=%h - WRONG (expected=%h)", clock_count, x_in, key_in, y, expected);
+        end
+    end
+endtask
+
+initial begin
+    clk = 1'b0;
+    reset = 1'b1;
+    x = 16'h0000;
+    key = 2'b00;
+    #20;
+    reset = 1'b0;
+    run_case(16'h3f80, 2'b10); // 1 / 1.0
+    run_case(16'h4000, 2'b10); // 1 / 2.0
+    run_case(16'h3f80, 2'b01); // sqrt(1.0)
+    run_case(16'h4000, 2'b01); // sqrt(2.0)
+
+    run_case(16'h4080, 2'b01); // sqrt(4.0)
+    run_case(16'h3f00, 2'b01); // sqrt(0.5)
+
+    run_case(16'h3fff, 2'b10); // 1 / 1.9922
+    run_case(16'h3fff, 2'b01); // sqrt(1.9922)
+    run_case(16'h3fc0, 2'b10); // 1 / 1.5
+
+    run_case(16'h0080, 2'b10); // 1 / (min norm)
+    run_case(16'h0080, 2'b01); // sqrt(min norm)
+    run_case(16'h7e80, 2'b10); // 1 / (max safe)
+    run_case(16'h7f7f, 2'b01); // sqrt(max norm)
+    $stop;
+end
+
+endmodule
