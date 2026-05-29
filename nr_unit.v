@@ -137,14 +137,11 @@ always @(posedge clk or posedge reset) begin
                     arg_q <= mant_q;
                     exp_work <= -exp_in;
                 end
-                state <= SEED;
-            end
-
-            SEED: begin
-                // Start with the lookup table estimate, then do two Newton-Raphson rounds.
-                y_q <= op_sqrt ? rsqrt_seed : recip_seed;
-                iter_count <= 1'b0;
                 state <= ITER_MUL1;
+					 
+					 y_q <= op_sqrt ? rsqrt_seed : recip_seed;
+					 iter_count <= 1'b0;
+					 
             end
 
             ITER_MUL1: begin
